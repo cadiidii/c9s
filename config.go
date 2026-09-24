@@ -64,6 +64,54 @@ func LoadConfig() (AppConfig, error) {
 	return cfg, nil
 }
 
+func sessionNamesPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "c9s", "session-names.yaml"), nil
+}
+
+// LoadSessionNames reads the sessionID -> custom label overlay used by the
+// rename feature. Renaming never touches the underlying .jsonl file or its
+// session ID, since Claude Code's own --resume lookup and sessionId fields
+// are tied to that original UUID; the label lives entirely in this sidecar
+// file instead.
+func LoadSessionNames() (map[string]string, error) {
+	path, err := sessionNamesPath()
+	if err != nil {
+		return map[string]string{}, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]string{}, nil
+		}
+		return map[string]string{}, fmt.Errorf("reading %s: %w", path, err)
+	}
+	names := map[string]string{}
+	if err := yaml.Unmarshal(data, &names); err != nil {
+		return map[string]string{}, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	return names, nil
+}
+
+// SaveSessionNames persists the sessionID -> custom label overlay.
+func SaveSessionNames(names map[string]string) error {
+	path, err := sessionNamesPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(names)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
 // ResolveBaseDir expands a leading "~" to the user's home directory.
 func ResolveBaseDir(baseDir string) string {
 	if !strings.HasPrefix(baseDir, "~") {
@@ -77,10 +125,12 @@ func ResolveBaseDir(baseDir string) string {
 }
 
 // ResolvedEnv builds the extra environment variables needed to launch Claude
-// Code under this context: the isolated CLAUDE_BASE_DIR plus any "env:VAR"
-// indirections resolved against the current process environment.
+// Code under this context: the isolated CLAUDE_CONFIG_DIR (the actual env var
+// Claude Code reads - not CLAUDE_BASE_DIR, which was an earlier spec typo)
+// plus any "env:VAR" indirections resolved against the current process
+// environment.
 func (c ContextConfig) ResolvedEnv() []string {
-	out := []string{fmt.Sprintf("CLAUDE_BASE_DIR=%s", ResolveBaseDir(c.BaseDir))}
+	out := []string{fmt.Sprintf("CLAUDE_CONFIG_DIR=%s", ResolveBaseDir(c.BaseDir))}
 	for k, v := range c.Env {
 		if rest, ok := strings.CutPrefix(v, "env:"); ok {
 			if val := os.Getenv(rest); val != "" {

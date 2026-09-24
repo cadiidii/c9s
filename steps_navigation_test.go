@@ -3,6 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,8 +29,19 @@ func TestNavigationFeatures(t *testing.T) {
 
 // navWorld holds scenario-scoped state for the navigation/actions steps.
 type navWorld struct {
-	m       model
-	tmpFile string
+	m          model
+	tmpFile    string
+	tmpContent string
+	sessionID  string
+
+	resumeCtx  ContextConfig
+	resumeSess SessionSummary
+	resumeCmd  *exec.Cmd
+	resumeErr  error
+
+	fakeClaudeDir  string
+	origPATH       string
+	pathOverridden bool
 }
 
 var viewNames = map[string]viewState{
@@ -41,17 +55,40 @@ var viewNames = map[string]viewState{
 // model.Update, so these tests exercise the actual navigation code path
 // rather than asserting against hand-set state.
 func pressKey(m model, key string) model {
-	var km tea.KeyMsg
+	next, _ := m.Update(keyMsgFor(key))
+	return next.(model)
+}
+
+func keyMsgFor(key string) tea.KeyMsg {
 	switch key {
 	case "enter":
-		km = tea.KeyMsg{Type: tea.KeyEnter}
+		return tea.KeyMsg{Type: tea.KeyEnter}
 	case "esc":
-		km = tea.KeyMsg{Type: tea.KeyEsc}
+		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "backspace":
+		return tea.KeyMsg{Type: tea.KeyBackspace}
 	default:
-		km = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
 	}
-	next, _ := m.Update(km)
-	return next.(model)
+}
+
+// pressKeyAndRunCmd also invokes any tea.Cmd returned by Update and feeds its
+// resulting Msg back through Update once. This is safe even for
+// tea.ExecProcess-wrapped commands: calling the returned Cmd closure only
+// yields bubbletea's internal exec-request message - actually spawning the
+// process happens later, inside Program's own run loop, which these
+// headless model tests never enter. Used where a step needs to observe the
+// side effect of a Cmd (e.g. a statusMsg set after a failed lookup).
+func pressKeyAndRunCmd(m model, key string) model {
+	next, cmd := m.Update(keyMsgFor(key))
+	m2 := next.(model)
+	if cmd != nil {
+		if msg := cmd(); msg != nil {
+			next2, _ := m2.Update(msg)
+			m2 = next2.(model)
+		}
+	}
+	return m2
 }
 
 func typeFilter(m model, query string) model {
@@ -95,11 +132,26 @@ func initNavigationScenario(ctx *godog.ScenarioContext) {
 	ctx.BeforeScenario(func(sc *godog.Scenario) {
 		w.m = model{}
 		w.tmpFile = ""
+		w.tmpContent = ""
+		w.sessionID = ""
+		w.resumeCtx = ContextConfig{}
+		w.resumeSess = SessionSummary{}
+		w.resumeCmd = nil
+		w.resumeErr = nil
+		w.fakeClaudeDir = ""
+		w.origPATH = ""
+		w.pathOverridden = false
 	})
 
 	ctx.AfterScenario(func(sc *godog.Scenario, err error) {
 		if w.tmpFile != "" {
 			os.Remove(w.tmpFile)
+		}
+		if w.fakeClaudeDir != "" {
+			os.RemoveAll(w.fakeClaudeDir)
+		}
+		if w.pathOverridden {
+			os.Setenv("PATH", w.origPATH)
 		}
 	})
 
@@ -168,7 +220,19 @@ func initNavigationScenario(ctx *godog.ScenarioContext) {
 		return nil
 	})
 	ctx.Step(`^I press "([^"]*)"$`, func(key string) error {
-		w.m = pressKey(w.m, key)
+		w.m = pressKeyAndRunCmd(w.m, key)
+		return nil
+	})
+	ctx.Step(`^I type "([^"]*)"$`, func(text string) error {
+		for _, r := range text {
+			w.m = pressKey(w.m, string(r))
+		}
+		return nil
+	})
+	ctx.Step(`^I clear the rename input$`, func() error {
+		for len(w.m.renameInput) > 0 {
+			w.m = pressKey(w.m, "backspace")
+		}
 		return nil
 	})
 	ctx.Step(`^I filter by "([^"]*)"$`, func(q string) error {
@@ -240,14 +304,16 @@ func initNavigationScenario(ctx *godog.ScenarioContext) {
 			return err
 		}
 		defer f.Close()
-		if _, err := f.WriteString(`{"type":"user","isMeta":false,"message":{"role":"user","content":"hi"}}` + "\n"); err != nil {
+		w.tmpContent = `{"type":"user","isMeta":false,"message":{"role":"user","content":"hi"}}` + "\n"
+		if _, err := f.WriteString(w.tmpContent); err != nil {
 			return err
 		}
 		w.tmpFile = f.Name()
 		return nil
 	})
 	ctx.Step(`^the active view is the Session View with that session selected$`, func() error {
-		sess := SessionSummary{ID: "test-session", Path: w.tmpFile, LastActive: time.Now()}
+		w.sessionID = "test-session"
+		sess := SessionSummary{ID: w.sessionID, Path: w.tmpFile, LastActive: time.Now()}
 		w.m = model{
 			config: AppConfig{
 				CurrentContext: "work",
@@ -257,6 +323,101 @@ func initNavigationScenario(ctx *godog.ScenarioContext) {
 			activeView:        viewSessions,
 			sessionFilterProj: 0,
 			cursor:            0,
+			sessionNames:      map[string]string{},
+		}
+		return nil
+	})
+	ctx.Step(`^the session already has the custom label "([^"]*)"$`, func(label string) error {
+		w.m.sessionNames[w.sessionID] = label
+		return nil
+	})
+	ctx.Step(`^the session has the custom label "([^"]*)"$`, func(want string) error {
+		got, ok := w.m.sessionNames[w.sessionID]
+		if !ok {
+			return fmt.Errorf("expected a custom label %q, but none is set", want)
+		}
+		if got != want {
+			return fmt.Errorf("expected custom label %q, got %q", want, got)
+		}
+		return nil
+	})
+	ctx.Step(`^the session has no custom label$`, func() error {
+		if got, ok := w.m.sessionNames[w.sessionID]; ok {
+			return fmt.Errorf("expected no custom label, but found %q", got)
+		}
+		return nil
+	})
+	ctx.Step(`^the session file is unchanged on disk$`, func() error {
+		data, err := os.ReadFile(w.tmpFile)
+		if err != nil {
+			return err
+		}
+		if string(data) != w.tmpContent {
+			return fmt.Errorf("expected session file content unchanged, got %q", string(data))
+		}
+		return nil
+	})
+
+	// ---- resume: real-binary fallback and clear failure messaging ----
+	ctx.Step(`^a context whose alias is not a real executable$`, func() error {
+		w.resumeCtx = ContextConfig{Alias: "definitely-not-a-real-c9s-binary-xyz", BaseDir: "~/.claude-work"}
+		w.resumeSess = SessionSummary{ID: "sess-fake"}
+		return nil
+	})
+	ctx.Step(`^the current context's alias is not a real executable$`, func() error {
+		w.m.config.Contexts["work"] = ContextConfig{Alias: "definitely-not-a-real-c9s-binary-xyz", BaseDir: "~/.claude-work"}
+		return nil
+	})
+	ctx.Step(`^a fake "claude" executable on PATH$`, func() error {
+		dir, err := os.MkdirTemp("", "c9s-fake-bin-*")
+		if err != nil {
+			return err
+		}
+		script := filepath.Join(dir, "claude")
+		if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			return err
+		}
+		w.fakeClaudeDir = dir
+		w.origPATH = os.Getenv("PATH")
+		w.pathOverridden = true
+		return os.Setenv("PATH", dir+string(os.PathListSeparator)+w.origPATH)
+	})
+	ctx.Step(`^no "claude" executable exists on PATH$`, func() error {
+		emptyDir, err := os.MkdirTemp("", "c9s-empty-bin-*")
+		if err != nil {
+			return err
+		}
+		w.fakeClaudeDir = emptyDir // reuse for cleanup, even though nothing lives in it
+		w.origPATH = os.Getenv("PATH")
+		w.pathOverridden = true
+		return os.Setenv("PATH", emptyDir)
+	})
+	ctx.Step(`^c9s builds the resume command for that context and session$`, func() error {
+		w.resumeCmd, w.resumeErr = buildResumeCmd(w.resumeCtx, w.resumeSess)
+		return nil
+	})
+	ctx.Step(`^the resume command runs the fake "claude" executable$`, func() error {
+		if w.resumeErr != nil {
+			return fmt.Errorf("expected buildResumeCmd to succeed, got error: %v", w.resumeErr)
+		}
+		want := filepath.Join(w.fakeClaudeDir, "claude")
+		if w.resumeCmd.Path != want {
+			return fmt.Errorf("expected resume command to run %q, got %q", want, w.resumeCmd.Path)
+		}
+		return nil
+	})
+	ctx.Step(`^the resume environment includes a CLAUDE_CONFIG_DIR entry for the context's base dir$`, func() error {
+		want := "CLAUDE_CONFIG_DIR=" + ResolveBaseDir(w.resumeCtx.BaseDir)
+		for _, e := range w.resumeCmd.Env {
+			if e == want {
+				return nil
+			}
+		}
+		return fmt.Errorf("expected env to include %q, got %v", want, w.resumeCmd.Env)
+	})
+	ctx.Step(`^the status message mentions that no executable was found$`, func() error {
+		if !strings.Contains(w.m.statusMsg, "found on PATH") {
+			return fmt.Errorf("expected status message to mention PATH lookup failure, got %q", w.m.statusMsg)
 		}
 		return nil
 	})

@@ -66,6 +66,17 @@ Steps return `error` (idiomatic godog), never `t.Fatal` inside a step func.
   filesystem-scanning behavior belongs to the session/project parsing
   feature's own tests, not the navigation feature's.
 
+## README.md must stay in sync with anything command-related
+
+Any change that touches a keybinding (`handleKey`'s switch), the `:command`
+bar (`handleCommandKey`), CLI usage/flags, or the `config.yaml` schema must
+update the corresponding section of `README.md` (Keys table, Command bar
+table, Usage, or Configuration example) in the *same* change — not as a
+follow-up. Treat a command-related change as incomplete until both the code
+and the README reflect it, the same way a feature isn't done until its BDD
+spec passes. Before finishing, diff what you touched against `README.md`'s
+tables and confirm they still match reality.
+
 ## Fan out subagents for parallel feature areas
 
 When adding several independent feature areas in one pass, split the work by

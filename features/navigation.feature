@@ -28,6 +28,11 @@ Feature: TUI navigation between contexts, projects, sessions and queries
     When I press "esc"
     Then the active view becomes the Session View
 
+  Scenario: Escaping the Session View returns to the Project View
+    Given the active view is the Session View
+    When I press "esc"
+    Then the active view becomes the Project View
+
   Scenario: Filtering narrows the visible project rows
     Given the active view is the Project View
     And projects include "enrichment-config" and "coreplatform"

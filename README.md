@@ -10,7 +10,7 @@ no mouse required.
 
 ## Features
 
-- **Multi-profile contexts** — switch between isolated `CLAUDE_BASE_DIR`
+- **Multi-profile contexts** — switch between isolated `CLAUDE_CONFIG_DIR`
   profiles without leaving the TUI.
 - **Real usage data** — project and session lists are built by scanning your
   actual `~/.claude*/projects/*.jsonl` transcripts, not mock data.
@@ -85,6 +85,7 @@ c9s
 | `Esc` | Clear filter, or back out one view |
 | `r` | Resume the selected session (`claude --resume <id>`) |
 | `v` | Open the selected session's raw `.jsonl` in `$EDITOR` |
+| `n` | Rename the selected session (a display-only label, stored in `~/.config/c9s/session-names.yaml` — never touches the underlying transcript or its session ID, so `--resume` keeps working) |
 | `d` | Delete the selected session (asks for `y`/`n` confirmation) |
 | `q` / `Ctrl+C` | Quit |
 

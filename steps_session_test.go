@@ -47,7 +47,7 @@ type sessionWorld struct {
 	scannedProjects []ProjectSummary
 	scanErr         error
 
-	queries []QueryCost
+	queries  []QueryCost
 	queryErr error
 
 	monthlyProjects []ProjectSummary

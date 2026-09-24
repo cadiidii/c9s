@@ -39,10 +39,10 @@ type queriesLoadedMsg struct {
 }
 
 type model struct {
-	config     AppConfig
-	projects   []ProjectSummary
-	loading    bool
-	loadErr    error
+	config   AppConfig
+	projects []ProjectSummary
+	loading  bool
+	loadErr  error
 
 	activeView viewState
 	cursor     int
@@ -51,8 +51,8 @@ type model struct {
 	// scoped to, or -1 for the global cross-project timeline (":sess").
 	sessionFilterProj int
 
-	filtering    bool
-	filterQuery  string
+	filtering   bool
+	filterQuery string
 
 	inCommand    bool
 	commandInput string
@@ -64,14 +64,25 @@ type model struct {
 	queriesLoading   bool
 	queriesErr       error
 	queriesSessionID string
+
+	// sessionNames is the sessionID -> custom label overlay written by the
+	// rename feature. It never touches the underlying .jsonl file.
+	sessionNames    map[string]string
+	renaming        bool
+	renameInput     string
+	renamingSession string
 }
 
-func initialModel(cfg AppConfig) model {
+func initialModel(cfg AppConfig, sessionNames map[string]string) model {
+	if sessionNames == nil {
+		sessionNames = map[string]string{}
+	}
 	return model{
 		config:            cfg,
 		activeView:        viewProjects,
 		sessionFilterProj: -1,
 		loading:           true,
+		sessionNames:      sessionNames,
 	}
 }
 
@@ -145,12 +156,20 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				m.statusMsg = fmt.Sprintf("deleted session %s", target.ID)
 				m.removeSession(target.Path)
+				if _, hadName := m.sessionNames[target.ID]; hadName {
+					delete(m.sessionNames, target.ID)
+					_ = SaveSessionNames(m.sessionNames)
+				}
 			}
 		default:
 			m.confirmDelete = nil
 			m.statusMsg = "delete cancelled"
 		}
 		return m, nil
+	}
+
+	if m.renaming {
+		return m.handleRenameKey(msg)
 	}
 
 	if m.inCommand {
@@ -182,8 +201,13 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 			return m, nil
 		}
-		if m.activeView == viewQueries {
+		switch m.activeView {
+		case viewQueries:
 			m.activeView = viewSessions
+			m.cursor = 0
+		case viewSessions:
+			m.activeView = viewProjects
+			m.sessionFilterProj = -1
 			m.cursor = 0
 		}
 		return m, nil
@@ -211,6 +235,9 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "d":
 		return m.handleDeletePrompt()
+
+	case "n":
+		return m.handleRenamePrompt()
 	}
 	return m, nil
 }
@@ -249,6 +276,45 @@ func (m model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	default:
 		m.commandInput += msg.String()
+		return m, nil
+	}
+}
+
+func (m model) handleRenameKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.renaming = false
+		label := strings.TrimSpace(m.renameInput)
+		if m.sessionNames == nil {
+			m.sessionNames = map[string]string{}
+		}
+		if label == "" {
+			delete(m.sessionNames, m.renamingSession)
+		} else {
+			m.sessionNames[m.renamingSession] = label
+		}
+		if err := SaveSessionNames(m.sessionNames); err != nil {
+			m.statusMsg = fmt.Sprintf("rename save failed: %v", err)
+		} else {
+			m.statusMsg = "renamed"
+		}
+		m.renamingSession = ""
+		m.renameInput = ""
+		return m, nil
+	case "esc":
+		m.renaming = false
+		m.renamingSession = ""
+		m.renameInput = ""
+		return m, nil
+	case "backspace":
+		if len(m.renameInput) > 0 {
+			m.renameInput = m.renameInput[:len(m.renameInput)-1]
+		}
+		return m, nil
+	default:
+		if len(msg.String()) == 1 {
+			m.renameInput += msg.String()
+		}
 		return m, nil
 	}
 }
@@ -321,6 +387,37 @@ func (m model) handleEnter() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// buildResumeCmd resolves the real binary to exec for resuming a session and
+// constructs the command. Split out from handleResume so the binary
+// resolution / env / cwd logic is unit-testable without going through
+// bubbletea's ExecProcess runtime plumbing (which only actually spawns the
+// process inside the Program's own event loop, not in any Cmd closure a test
+// could call directly).
+//
+// ctx.Alias is often a shell alias/function (e.g. zsh's
+// `alias claude-work='CLAUDE_CONFIG_DIR=... command claude'`), not a real
+// executable - exec.Command bypasses the shell entirely, so it can never
+// resolve one. Try it as a literal binary first (covers setups where it
+// really is one), then fall back to the real "claude" binary with
+// CLAUDE_CONFIG_DIR set via ResolvedEnv, which is what the alias would have
+// done anyway.
+func buildResumeCmd(ctx ContextConfig, sess SessionSummary) (*exec.Cmd, error) {
+	bin, lookErr := exec.LookPath(ctx.Alias)
+	if lookErr != nil {
+		bin, lookErr = exec.LookPath("claude")
+	}
+	if lookErr != nil {
+		return nil, fmt.Errorf("neither %q nor \"claude\" found on PATH", ctx.Alias)
+	}
+
+	c := exec.Command(bin, "--resume", sess.ID)
+	c.Env = append(os.Environ(), ctx.ResolvedEnv()...)
+	if sess.Cwd != "" {
+		c.Dir = sess.Cwd
+	}
+	return c, nil
+}
+
 func (m model) handleResume() (tea.Model, tea.Cmd) {
 	if m.activeView != viewSessions {
 		return m, nil
@@ -332,8 +429,12 @@ func (m model) handleResume() (tea.Model, tea.Cmd) {
 	sess := sessions[m.cursor]
 	ctx := m.config.Contexts[m.config.CurrentContext]
 
-	c := exec.Command(ctx.Alias, "--resume", sess.ID)
-	c.Env = append(os.Environ(), ctx.ResolvedEnv()...)
+	c, err := buildResumeCmd(ctx, sess)
+	if err != nil {
+		return m, func() tea.Msg {
+			return statusMsg("resume failed: " + err.Error())
+		}
+	}
 
 	return m, tea.ExecProcess(c, func(err error) tea.Msg {
 		if err != nil {
@@ -341,6 +442,21 @@ func (m model) handleResume() (tea.Model, tea.Cmd) {
 		}
 		return statusMsg("resumed session " + sess.ID)
 	})
+}
+
+func (m model) handleRenamePrompt() (tea.Model, tea.Cmd) {
+	if m.activeView != viewSessions {
+		return m, nil
+	}
+	sessions := m.visibleSessions()
+	if m.cursor >= len(sessions) {
+		return m, nil
+	}
+	sess := sessions[m.cursor]
+	m.renaming = true
+	m.renamingSession = sess.ID
+	m.renameInput = m.sessionNames[sess.ID]
+	return m, nil
 }
 
 func (m model) handleViewLog() (tea.Model, tea.Cmd) {
@@ -563,7 +679,11 @@ func (m model) renderSessions() string {
 	s.WriteString(strings.Repeat("-", 100) + "\n")
 	for i, sess := range rows {
 		idCol := fmt.Sprintf("%s (%s)", sess.ID[:8], relTime(sess.LastActive))
-		row := fmt.Sprintf("%-38s %-40s %-9d %-10s", idCol, truncate(sess.PromptSummary, 40), sess.Exchanges, formatTokens(sess.Tokens))
+		label := sess.PromptSummary
+		if custom, ok := m.sessionNames[sess.ID]; ok && custom != "" {
+			label = "★ " + custom // filled star marks a custom name
+		}
+		row := fmt.Sprintf("%-38s %-40s %-9d %-10s", idCol, truncate(label, 40), sess.Exchanges, formatTokens(sess.Tokens))
 		s.WriteString(m.styledRow(row, i) + "\n")
 	}
 	return s.String()
@@ -592,6 +712,9 @@ func (m model) styledRow(row string, i int) string {
 }
 
 func (m model) renderFooter() string {
+	if m.renaming {
+		return footerStyle.Render("rename: " + m.renameInput)
+	}
 	if m.inCommand {
 		return footerStyle.Render(":" + m.commandInput)
 	}
@@ -602,7 +725,7 @@ func (m model) renderFooter() string {
 	var legend string
 	switch m.activeView {
 	case viewSessions:
-		legend = " <Enter> Query Costs  <r> Resume  <v> View Log  <d> Delete  <:> Cmd  <q> Quit "
+		legend = " <Enter> Query Costs  <r> Resume  <v> View Log  <n> Rename  <d> Delete  <Esc> Back  <:> Cmd  <q> Quit "
 	case viewContexts:
 		legend = " <Enter> Switch Context  <:> Cmd  <q> Quit "
 	case viewQueries:
@@ -650,8 +773,12 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "c9s: %v (continuing with defaults)\n", err)
 	}
+	sessionNames, err := LoadSessionNames()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "c9s: %v (continuing without saved session names)\n", err)
+	}
 
-	p := tea.NewProgram(initialModel(cfg))
+	p := tea.NewProgram(initialModel(cfg, sessionNames))
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "c9s: fatal: %v\n", err)
 		os.Exit(1)
