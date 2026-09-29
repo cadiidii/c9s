@@ -90,7 +90,7 @@ func initSessionScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^a session transcript containing one valid user line and one line of garbage text$`, malformedTranscript)
 	ctx.Step(`^I parse the session$`, iParseTheSession)
 	ctx.Step(`^parsing the session succeeds$`, parsingSessionSucceeds)
-	ctx.Step(`^the session prompt summary is "([^"]*)"$`, theSessionPromptSummaryIs)
+	ctx.Step(`^the session last prompt is "([^"]*)"$`, theSessionLastPromptIs)
 	ctx.Step(`^the session has (\d+) exchanges?$`, theSessionHasExchanges)
 	ctx.Step(`^the session cost is \$([0-9.]+)$`, theSessionCostIs)
 	ctx.Step(`^the session tokens are (\d+)$`, theSessionTokensAre)
@@ -258,9 +258,9 @@ func parsingSessionSucceeds() error {
 	return nil
 }
 
-func theSessionPromptSummaryIs(want string) error {
-	if sw.parsedSession.PromptSummary != want {
-		return fmt.Errorf("prompt summary = %q, want %q", sw.parsedSession.PromptSummary, want)
+func theSessionLastPromptIs(want string) error {
+	if sw.parsedSession.LastPrompt != want {
+		return fmt.Errorf("last prompt = %q, want %q", sw.parsedSession.LastPrompt, want)
 	}
 	return nil
 }

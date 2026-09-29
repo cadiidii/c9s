@@ -10,10 +10,21 @@ Feature: Session and project history parsing
       | assistant | assistant |             | false  |
     And the transcript has a final cost-state of $1.50 across model "claude-sonnet-5" with 1000 tokens
     When I parse the session
-    Then the session prompt summary is "Fix the bug"
+    Then the session last prompt is "Fix the bug"
     And the session has 2 exchanges
     And the session cost is $1.50
     And the session tokens are 1000
+
+  Scenario: The last prompt is the most recent real user prompt, not the first
+    Given a session transcript with:
+      | type      | role      | content        | isMeta |
+      | user      | user      | First question | false  |
+      | assistant | assistant |                | false  |
+      | user      | user      | Latest ask     | false  |
+      | assistant | assistant |                | false  |
+      | user      | user      | caveat noise   | true   |
+    When I parse the session
+    Then the session last prompt is "Latest ask"
 
   Scenario: Meta lines are not counted as exchanges
     Given a session transcript with:
@@ -21,7 +32,7 @@ Feature: Session and project history parsing
       | user | user | local command caveat | true   |
     When I parse the session
     Then the session has 0 exchanges
-    And the session prompt summary is ""
+    And the session last prompt is ""
 
   Scenario: Malformed lines are skipped without failing the parse
     Given a session transcript containing one valid user line and one line of garbage text

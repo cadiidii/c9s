@@ -20,6 +20,9 @@ no mouse required.
 - **Per-query cost breakdown** — drill into a session to see an estimated
   cost per individual prompt, derived from the session's own authoritative
   total (no separate pricing table to maintain).
+- **Full-screen, k9s-style layout** — fills the terminal, resizes live and
+  scrolls long lists; the Session View shows each session's name and its
+  last prompt.
 - **Session actions** — new (`n`), resume (`r`), view raw log in `$EDITOR` (`v`), delete
   with confirmation (`d`).
 

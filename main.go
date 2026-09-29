@@ -47,6 +47,11 @@ type model struct {
 	activeView viewState
 	cursor     int
 
+	// width/height are the terminal size from tea.WindowSizeMsg (0 until the
+	// first one arrives); offset is the index of the first visible table row.
+	width, height int
+	offset        int
+
 	// sessionFilterProj is the index into projects that the Session View is
 	// scoped to, or -1 for the global cross-project timeline (":sess").
 	sessionFilterProj int
@@ -113,7 +118,20 @@ func loadQueriesCmd(sess SessionSummary) tea.Cmd {
 // ------------------------------------------------------------------
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	if nm, ok := next.(model); ok {
+		nm.clampScroll()
+		next = nm
+	}
+	return next, cmd
+}
+
+func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		return m, nil
+
 	case projectsLoadedMsg:
 		if msg.contextKey != m.config.CurrentContext {
 			return m, nil // stale response from a context we've since switched away from
@@ -615,7 +633,8 @@ func (m model) visibleSessions() []SessionSummary {
 	q := strings.ToLower(m.filterQuery)
 	var out []SessionSummary
 	for _, s := range base {
-		if strings.Contains(strings.ToLower(s.PromptSummary), q) || strings.Contains(strings.ToLower(s.ID), q) {
+		if strings.Contains(strings.ToLower(s.LastPrompt), q) || strings.Contains(strings.ToLower(s.ID), q) ||
+			strings.Contains(strings.ToLower(m.sessionNames[s.ID]), q) {
 			out = append(out, s)
 		}
 	}
@@ -648,147 +667,6 @@ var (
 	errorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#f85149")).Bold(true)
 )
 
-func (m model) View() string {
-	var s strings.Builder
-
-	s.WriteString(m.renderHeader() + "\n\n")
-
-	if m.confirmDelete != nil {
-		s.WriteString(errorStyle.Render(fmt.Sprintf("Are you sure you want to delete session %s? (y/n)", m.confirmDelete.ID)) + "\n")
-	} else if m.loading {
-		s.WriteString(dimStyle.Render("Scanning project history...") + "\n")
-	} else if m.loadErr != nil {
-		s.WriteString(errorStyle.Render(fmt.Sprintf("Error scanning history: %v", m.loadErr)) + "\n")
-	} else if m.activeView == viewQueries && m.queriesLoading {
-		s.WriteString(dimStyle.Render("Scanning session for per-query costs...") + "\n")
-	} else if m.activeView == viewQueries && m.queriesErr != nil {
-		s.WriteString(errorStyle.Render(fmt.Sprintf("Error scanning session: %v", m.queriesErr)) + "\n")
-	} else {
-		switch m.activeView {
-		case viewContexts:
-			s.WriteString(m.renderContexts())
-		case viewSessions:
-			s.WriteString(m.renderSessions())
-		case viewQueries:
-			s.WriteString(m.renderQueries())
-		default:
-			s.WriteString(m.renderProjects())
-		}
-	}
-
-	s.WriteString("\n")
-	s.WriteString(m.renderFooter())
-	return s.String()
-}
-
-func (m model) renderHeader() string {
-	ctx := m.config.Contexts[m.config.CurrentContext]
-	tokens, cost := MonthlyTotals(m.projects, time.Now())
-	line1 := fmt.Sprintf("Context: [%s] (%s)  |  Base: %s/projects/", accentText.Render(m.config.CurrentContext), ctx.Alias, ctx.BaseDir)
-	line2 := fmt.Sprintf("Tokens (Month): %s      |  Estimated Spend: $%.2f", formatTokens(tokens), cost)
-	return headerStyle.Render(line1 + "\n" + line2)
-}
-
-func (m model) renderContexts() string {
-	var s strings.Builder
-	s.WriteString(fmt.Sprintf("%-15s %-20s %-25s\n", "CONTEXT KEY", "SHELL ALIAS", "BASE DIR"))
-	s.WriteString(strings.Repeat("-", 62) + "\n")
-	for i, key := range m.contextKeys() {
-		ctx := m.config.Contexts[key]
-		row := fmt.Sprintf("%-15s %-20s %-25s", key, ctx.Alias, ctx.BaseDir)
-		if key == m.config.CurrentContext {
-			row += " (active)"
-		}
-		s.WriteString(m.styledRow(row, i) + "\n")
-	}
-	return s.String()
-}
-
-func (m model) renderProjects() string {
-	rows := m.visibleProjects()
-	if len(rows) == 0 {
-		return dimStyle.Render("No project history found for this context yet.") + "\n"
-	}
-	var s strings.Builder
-	s.WriteString(fmt.Sprintf("%-55s %-9s %-14s %-10s\n", "PROJECT WORKSPACE PATH", "SESSIONS", "LAST ACTIVE", "COST ($)"))
-	s.WriteString(strings.Repeat("-", 92) + "\n")
-	for i, p := range rows {
-		row := fmt.Sprintf("%-55s %-9d %-14s $%-9.2f", truncate(p.Cwd, 55), len(p.Sessions), relTime(p.LastActive), p.TotalCost)
-		s.WriteString(m.styledRow(row, i) + "\n")
-	}
-	return s.String()
-}
-
-func (m model) renderSessions() string {
-	rows := m.visibleSessions()
-	if len(rows) == 0 {
-		return dimStyle.Render("No sessions found.") + "\n"
-	}
-	var s strings.Builder
-	s.WriteString(fmt.Sprintf("%-38s %-40s %-9s %-10s\n", "SESSION ID / TIME", "INITIAL PROMPT", "EXCHNG", "TOKENS"))
-	s.WriteString(strings.Repeat("-", 100) + "\n")
-	for i, sess := range rows {
-		idCol := fmt.Sprintf("%s (%s)", sess.ID[:8], relTime(sess.LastActive))
-		label := sess.PromptSummary
-		if custom, ok := m.sessionNames[sess.ID]; ok && custom != "" {
-			label = "★ " + custom // filled star marks a custom name
-		}
-		row := fmt.Sprintf("%-38s %-40s %-9d %-10s", idCol, truncate(label, 40), sess.Exchanges, formatTokens(sess.Tokens))
-		s.WriteString(m.styledRow(row, i) + "\n")
-	}
-	return s.String()
-}
-
-func (m model) renderQueries() string {
-	if len(m.queries) == 0 {
-		return dimStyle.Render("No queries found for this session.") + "\n"
-	}
-	var s strings.Builder
-	s.WriteString(fmt.Sprintf("%-8s %-14s %-20s %-10s %-9s %-40s\n", "QUERY #", "TIME", "MODEL(S)", "TOKENS", "COST ($)", "PROMPT"))
-	s.WriteString(strings.Repeat("-", 104) + "\n")
-	for i, q := range m.queries {
-		row := fmt.Sprintf("%-8d %-14s %-20s %-10s $%-8.2f %-40s",
-			q.Index, relTime(q.Timestamp), truncate(modelsLabel(q.Models), 20), formatTokens(q.Tokens), q.CostUSD, truncate(q.PromptSummary, 40))
-		s.WriteString(m.styledRow(row, i) + "\n")
-	}
-	return s.String()
-}
-
-func (m model) styledRow(row string, i int) string {
-	if m.cursor == i {
-		return selectStyle.Render(row)
-	}
-	return row
-}
-
-func (m model) renderFooter() string {
-	if m.renaming {
-		return footerStyle.Render("rename: " + m.renameInput)
-	}
-	if m.inCommand {
-		return footerStyle.Render(":" + m.commandInput)
-	}
-	if m.filtering || m.filterQuery != "" {
-		return footerStyle.Render("/" + m.filterQuery)
-	}
-
-	var legend string
-	switch m.activeView {
-	case viewSessions:
-		legend = " <Enter> Query Costs  <r> Resume  <v> View Log  <n> New  <R> Rename  <d> Delete  <Esc> Back  <:> Cmd  <q> Quit "
-	case viewContexts:
-		legend = " <Enter> Switch Context  <:> Cmd  <q> Quit "
-	case viewQueries:
-		legend = " <Esc> Back  <:> Cmd  <q> Quit "
-	default:
-		legend = " <Enter> Sessions  <n> New  <j/k> Move  </> Filter  <:> Cmd  <q> Quit "
-	}
-	if m.statusMsg != "" {
-		legend = fmt.Sprintf(" [%s] |%s", m.statusMsg, legend)
-	}
-	return footerStyle.Render(legend)
-}
-
 func formatTokens(n int64) string {
 	s := fmt.Sprintf("%d", n)
 	var out []byte
@@ -818,6 +696,13 @@ func relTime(t time.Time) string {
 	}
 }
 
+// programOptions are the bubbletea options c9s always runs with. The alternate
+// screen is what lets c9s hand the terminal to claude (resume / new session)
+// and come back to a clean repaint instead of re-printing below its output.
+func programOptions() []tea.ProgramOption {
+	return []tea.ProgramOption{tea.WithAltScreen()}
+}
+
 func main() {
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -828,7 +713,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "c9s: %v (continuing without saved session names)\n", err)
 	}
 
-	p := tea.NewProgram(initialModel(cfg, sessionNames))
+	p := tea.NewProgram(initialModel(cfg, sessionNames), programOptions()...)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "c9s: fatal: %v\n", err)
 		os.Exit(1)
