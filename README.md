@@ -20,7 +20,7 @@ no mouse required.
 - **Per-query cost breakdown** — drill into a session to see an estimated
   cost per individual prompt, derived from the session's own authoritative
   total (no separate pricing table to maintain).
-- **Session actions** — resume (`r`), view raw log in `$EDITOR` (`v`), delete
+- **Session actions** — new (`n`), resume (`r`), view raw log in `$EDITOR` (`v`), delete
   with confirmation (`d`).
 
 ## Installation
@@ -85,7 +85,8 @@ c9s
 | `Esc` | Clear filter, or back out one view |
 | `r` | Resume the selected session (`claude --resume <id>`) |
 | `v` | Open the selected session's raw `.jsonl` in `$EDITOR` |
-| `n` | Rename the selected session (a display-only label, stored in `~/.config/c9s/session-names.yaml` — never touches the underlying transcript or its session ID, so `--resume` keeps working) |
+| `n` | Start a new Claude Code session in the selected project's (Project View) or session's (Session View) directory, using the current context's profile |
+| `R` | Rename the selected session (a display-only label, stored in `~/.config/c9s/session-names.yaml` — never touches the underlying transcript or its session ID, so `--resume` keeps working) |
 | `d` | Delete the selected session (asks for `y`/`n` confirmation) |
 | `q` / `Ctrl+C` | Quit |
 

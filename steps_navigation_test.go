@@ -39,6 +39,9 @@ type navWorld struct {
 	resumeCmd  *exec.Cmd
 	resumeErr  error
 
+	newCmd *exec.Cmd
+	newErr error
+
 	fakeClaudeDir  string
 	origPATH       string
 	pathOverridden bool
@@ -329,6 +332,65 @@ func initNavigationScenario(ctx *godog.ScenarioContext) {
 	})
 	ctx.Step(`^the session already has the custom label "([^"]*)"$`, func(label string) error {
 		w.m.sessionNames[w.sessionID] = label
+		return nil
+	})
+	ctx.Step(`^the active view is the Project View with a project selected$`, func() error {
+		w.m = newNavTestModel("work", 1)
+		w.m.sessionNames = map[string]string{}
+		w.m.activeView = viewProjects
+		return nil
+	})
+	ctx.Step(`^the active view is the Context View with a context selected$`, func() error {
+		w.m = newNavTestModel("work", 1)
+		w.m.sessionNames = map[string]string{}
+		w.m.activeView = viewContexts
+		return nil
+	})
+	ctx.Step(`^c9s builds the new session command for that context in the directory "([^"]*)"$`, func(dir string) error {
+		w.newCmd, w.newErr = buildNewSessionCmd(w.resumeCtx, dir)
+		return nil
+	})
+	ctx.Step(`^the new session command runs the fake "claude" executable$`, func() error {
+		if w.newErr != nil {
+			return fmt.Errorf("expected buildNewSessionCmd to succeed, got error: %v", w.newErr)
+		}
+		want := filepath.Join(w.fakeClaudeDir, "claude")
+		if w.newCmd.Path != want {
+			return fmt.Errorf("expected new session command to run %q, got %q", want, w.newCmd.Path)
+		}
+		return nil
+	})
+	ctx.Step(`^the new session command has no arguments$`, func() error {
+		if len(w.newCmd.Args) != 1 {
+			return fmt.Errorf("expected no arguments beyond the binary, got %v", w.newCmd.Args)
+		}
+		return nil
+	})
+	ctx.Step(`^the new session command starts in the directory "([^"]*)"$`, func(want string) error {
+		if w.newCmd.Dir != want {
+			return fmt.Errorf("expected directory %q, got %q", want, w.newCmd.Dir)
+		}
+		return nil
+	})
+	ctx.Step(`^the new session environment includes a CLAUDE_CONFIG_DIR entry for the context's base dir$`, func() error {
+		want := "CLAUDE_CONFIG_DIR=" + ResolveBaseDir(w.resumeCtx.BaseDir)
+		for _, e := range w.newCmd.Env {
+			if e == want {
+				return nil
+			}
+		}
+		return fmt.Errorf("expected env to include %q, got %v", want, w.newCmd.Env)
+	})
+	ctx.Step(`^no rename prompt is open$`, func() error {
+		if w.m.renaming {
+			return fmt.Errorf("expected no rename prompt, but one is open")
+		}
+		return nil
+	})
+	ctx.Step(`^there is no status message$`, func() error {
+		if w.m.statusMsg != "" {
+			return fmt.Errorf("expected no status message, got %q", w.m.statusMsg)
+		}
 		return nil
 	})
 	ctx.Step(`^the session has the custom label "([^"]*)"$`, func(want string) error {

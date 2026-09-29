@@ -1,4 +1,8 @@
-# CLAUDE.md — c9s
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+# c9s
 
 A K9s-style TUI for browsing Claude Code session/project history across
 multiple profiles. Go + bubbletea/lipgloss. See `features/` for the current
@@ -90,6 +94,40 @@ integration check.
 ## Running the suite
 
 ```sh
+go build -o c9s .      # build (the ./c9s binary is gitignored)
+go vet ./...           # static checks
 go test ./...          # everything
 go test -run TestConfigFeatures -v .   # one area
 ```
+
+A `Test...` entrypoint can cover several `.feature` files (Navigation runs
+`navigation` + `session_actions`; Session runs `session_and_project` +
+`query_cost`), so a new feature file goes in the `Paths` of the area whose
+steps it reuses. To run one scenario, use the subtest name (spaces become underscores):
+`go test -run 'TestNavigationFeatures/Escaping_the_Query_View_returns_to_the_Session_View' -v .`
+
+## Architecture
+
+Flat `package main` (no subpackages); one bubbletea `model` in `main.go`.
+
+- `main.go` — the whole TUI: `viewState` (Context → Project → Session →
+  Query), `handleKey` / `handleCommandKey` / `handleFilterKey` /
+  `handleRenameKey` (input modes), `View()` rendering, and resume/view/delete
+  actions. Slow work runs in `tea.Cmd`s (`loadProjectsCmd`, `loadQueriesCmd`)
+  that return `projectsLoadedMsg` / `queriesLoadedMsg`.
+- `session.go` — `ScanProjects` walks `<base_dir>/projects/*/*.jsonl` and
+  `ParseSession` reduces each transcript to a `SessionSummary`. Unparseable
+  lines are skipped, not fatal; the scanner buffer is 16MB because assistant
+  lines can hold huge thinking blocks.
+- `query_cost.go` — per-prompt cost. Transcripts have no per-turn cost, only
+  cumulative `cost-state` lines (last one wins), so per-model $/token is
+  derived from the final `cost-state` and rescaled so query costs sum exactly
+  to the session total. **Do not add a hardcoded price table.**
+- `config.go` — `~/.config/c9s/config.yaml` (contexts = named
+  `CLAUDE_CONFIG_DIR` profiles) and `session-names.yaml` (display-only
+  renames keyed by session ID; never modify transcripts). `env:VAR` values in
+  a context's `env` are resolved from the shell at launch.
+- Resume (`buildResumeCmd`) tries the context's `alias` as a binary, falls
+  back to `claude` with the context env applied, and runs in the session's
+  recorded `cwd`. Aliases are usually shell aliases, so the fallback is the
+  common path.

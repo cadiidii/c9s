@@ -237,6 +237,9 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleDeletePrompt()
 
 	case "n":
+		return m.handleNewSession()
+
+	case "R":
 		return m.handleRenamePrompt()
 	}
 	return m, nil
@@ -402,6 +405,16 @@ func (m model) handleEnter() (tea.Model, tea.Cmd) {
 // CLAUDE_CONFIG_DIR set via ResolvedEnv, which is what the alias would have
 // done anyway.
 func buildResumeCmd(ctx ContextConfig, sess SessionSummary) (*exec.Cmd, error) {
+	return buildClaudeCmd(ctx, sess.Cwd, "--resume", sess.ID)
+}
+
+// buildNewSessionCmd starts a fresh claude session for the context, in dir
+// (or c9s's own working directory when dir is empty).
+func buildNewSessionCmd(ctx ContextConfig, dir string) (*exec.Cmd, error) {
+	return buildClaudeCmd(ctx, dir)
+}
+
+func buildClaudeCmd(ctx ContextConfig, dir string, args ...string) (*exec.Cmd, error) {
 	bin, lookErr := exec.LookPath(ctx.Alias)
 	if lookErr != nil {
 		bin, lookErr = exec.LookPath("claude")
@@ -410,12 +423,49 @@ func buildResumeCmd(ctx ContextConfig, sess SessionSummary) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("neither %q nor \"claude\" found on PATH", ctx.Alias)
 	}
 
-	c := exec.Command(bin, "--resume", sess.ID)
+	c := exec.Command(bin, args...)
 	c.Env = append(os.Environ(), ctx.ResolvedEnv()...)
-	if sess.Cwd != "" {
-		c.Dir = sess.Cwd
+	if dir != "" {
+		c.Dir = dir
 	}
 	return c, nil
+}
+
+// handleNewSession starts a new claude session in the selected project's
+// directory (Project View) or the selected session's directory (Session View).
+func (m model) handleNewSession() (tea.Model, tea.Cmd) {
+	var dir string
+	switch m.activeView {
+	case viewProjects:
+		projects := m.visibleProjects()
+		if m.cursor >= len(projects) {
+			return m, nil
+		}
+		dir = projects[m.cursor].Cwd
+	case viewSessions:
+		sessions := m.visibleSessions()
+		if m.cursor >= len(sessions) {
+			return m, nil
+		}
+		dir = sessions[m.cursor].Cwd
+	default:
+		return m, nil
+	}
+	ctx := m.config.Contexts[m.config.CurrentContext]
+
+	c, err := buildNewSessionCmd(ctx, dir)
+	if err != nil {
+		return m, func() tea.Msg {
+			return statusMsg("new session failed: " + err.Error())
+		}
+	}
+
+	return m, tea.ExecProcess(c, func(err error) tea.Msg {
+		if err != nil {
+			return statusMsg(fmt.Sprintf("new session exited with error: %v", err))
+		}
+		return statusMsg("new session ended")
+	})
 }
 
 func (m model) handleResume() (tea.Model, tea.Cmd) {
@@ -725,13 +775,13 @@ func (m model) renderFooter() string {
 	var legend string
 	switch m.activeView {
 	case viewSessions:
-		legend = " <Enter> Query Costs  <r> Resume  <v> View Log  <n> Rename  <d> Delete  <Esc> Back  <:> Cmd  <q> Quit "
+		legend = " <Enter> Query Costs  <r> Resume  <v> View Log  <n> New  <R> Rename  <d> Delete  <Esc> Back  <:> Cmd  <q> Quit "
 	case viewContexts:
 		legend = " <Enter> Switch Context  <:> Cmd  <q> Quit "
 	case viewQueries:
 		legend = " <Esc> Back  <:> Cmd  <q> Quit "
 	default:
-		legend = " <Enter> Sessions  <j/k> Move  </> Filter  <:> Cmd  <q> Quit "
+		legend = " <Enter> Sessions  <n> New  <j/k> Move  </> Filter  <:> Cmd  <q> Quit "
 	}
 	if m.statusMsg != "" {
 		legend = fmt.Sprintf(" [%s] |%s", m.statusMsg, legend)
