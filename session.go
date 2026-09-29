@@ -42,16 +42,16 @@ type jsonlLine struct {
 
 // SessionSummary is the per-session row shown in the Session View.
 type SessionSummary struct {
-	ID            string
-	Path          string
-	ProjectDir    string
-	Cwd           string
-	GitBranch     string
-	PromptSummary string
-	Exchanges     int
-	Tokens        int64
-	CostUSD       float64
-	LastActive    time.Time
+	ID         string
+	Path       string
+	ProjectDir string
+	Cwd        string
+	GitBranch  string
+	LastPrompt string // most recent real user prompt, truncated
+	Exchanges  int
+	Tokens     int64
+	CostUSD    float64
+	LastActive time.Time
 }
 
 // ProjectSummary is the per-project row shown in the Project View, aggregated
@@ -112,9 +112,11 @@ func ParseSession(path string) (SessionSummary, error) {
 				continue
 			}
 			sess.Exchanges++
-			if line.Type == "user" && sess.PromptSummary == "" && line.Message != nil {
+			if line.Type == "user" && line.Message != nil {
 				if text := extractText(line.Message.Content); text != "" {
-					sess.PromptSummary = truncate(text, 80)
+					// Last real prompt wins; tool-result-only lines
+					// extract to "" and never overwrite.
+					sess.LastPrompt = truncate(text, 200)
 				}
 			}
 		case "cost-state":

@@ -110,13 +110,18 @@ steps it reuses. To run one scenario, use the subtest name (spaces become unders
 
 Flat `package main` (no subpackages); one bubbletea `model` in `main.go`.
 
-- `main.go` — the whole TUI: `viewState` (Context → Project → Session →
-  Query), `handleKey` / `handleCommandKey` / `handleFilterKey` /
-  `handleRenameKey` (input modes), `View()` rendering, and resume/view/delete
-  actions. Slow work runs in `tea.Cmd`s (`loadProjectsCmd`, `loadQueriesCmd`)
+- `main.go` — TUI state and behavior: `viewState` (Context → Project →
+  Session → Query), `handleKey` / `handleCommandKey` / `handleFilterKey` /
+  `handleRenameKey` (input modes), and new/resume/view/delete actions. Slow work runs in `tea.Cmd`s (`loadProjectsCmd`, `loadQueriesCmd`)
   that return `projectsLoadedMsg` / `queriesLoadedMsg`.
+- `layout.go` — rendering. `View()` fills the terminal exactly (`width` /
+  `height` from `tea.WindowSizeMsg`, alt-screen): fixed-width vs `flex`
+  columns via `resolveWidths`, a scrolling window (`offset`, kept in range by
+  `clampScroll` after every `Update`), and every line truncated to the width.
+  With no size yet (headless tests) it renders unbounded.
 - `session.go` — `ScanProjects` walks `<base_dir>/projects/*/*.jsonl` and
-  `ParseSession` reduces each transcript to a `SessionSummary`. Unparseable
+  `ParseSession` reduces each transcript to a `SessionSummary` (`LastPrompt`
+  is the most recent real user prompt, not the first). Unparseable
   lines are skipped, not fatal; the scanner buffer is 16MB because assistant
   lines can hold huge thinking blocks.
 - `query_cost.go` — per-prompt cost. Transcripts have no per-turn cost, only
