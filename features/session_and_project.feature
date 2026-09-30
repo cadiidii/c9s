@@ -26,6 +26,39 @@ Feature: Session and project history parsing
     When I parse the session
     Then the session last prompt is "Latest ask"
 
+  Scenario: A session renamed in Claude Code carries that name, the latest rename winning
+    Given a session transcript with:
+      | type | role | content | isMeta |
+      | user | user | Hello   | false  |
+    And the transcript was renamed in Claude Code to "Auth refactor"
+    And the transcript was later renamed in Claude Code to "Auth refactor v2"
+    When I parse the session
+    Then the session name is "Auth refactor v2"
+
+  Scenario: A session never renamed gets the title Claude Code generated for it
+    Given a session transcript with:
+      | type | role | content | isMeta |
+      | user | user | Hello   | false  |
+    And the transcript has a generated title "Fixing login bug"
+    When I parse the session
+    Then the session name is "Fixing login bug"
+
+  Scenario: A rename in Claude Code beats the generated title
+    Given a session transcript with:
+      | type | role | content | isMeta |
+      | user | user | Hello   | false  |
+    And the transcript has a generated title "Fixing login bug"
+    And the transcript was renamed in Claude Code to "Auth refactor"
+    When I parse the session
+    Then the session name is "Auth refactor"
+
+  Scenario: A session with no title at all has no name
+    Given a session transcript with:
+      | type | role | content | isMeta |
+      | user | user | Hello   | false  |
+    When I parse the session
+    Then the session name is ""
+
   Scenario: Meta lines are not counted as exchanges
     Given a session transcript with:
       | type | role | content              | isMeta |

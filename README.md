@@ -23,6 +23,9 @@ no mouse required.
 - **Full-screen, k9s-style layout** — fills the terminal, resizes live and
   scrolls long lists; the Session View shows each session's name and its
   last prompt.
+- **Session names from Claude Code** — the NAME column shows the name you set
+  with `/rename` in Claude Code, falling back to the title Claude Code generated;
+  a name set in c9s with `R` overrides both.
 - **Session actions** — new (`n`), resume (`r`), view raw log in `$EDITOR` (`v`), delete
   with confirmation (`d`).
 
@@ -93,7 +96,7 @@ at the top. Press `s` to switch to the per-project list and back.
 | `v` | Open the selected session's raw `.jsonl` in `$EDITOR` |
 | `s` | Toggle between the Project View and the all-sessions list (newest first, with a PROJECT column) |
 | `n` | Start a new Claude Code session in the selected project's (Project View) or session's (Session View) directory, using the current context's profile |
-| `R` | Rename the selected session (a display-only label, stored in `~/.config/c9s/session-names.yaml` — never touches the underlying transcript or its session ID, so `--resume` keeps working) |
+| `R` | Rename the selected session (a display-only label that takes precedence over the name Claude Code shows, stored in `~/.config/c9s/session-names.yaml` — never touches the underlying transcript or its session ID, so `--resume` keeps working) |
 | `d` | Delete the selected session (asks for `y`/`n` confirmation) |
 | `q` / `Ctrl+C` | Quit |
 
