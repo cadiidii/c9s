@@ -65,6 +65,57 @@ func initSessionListScenario(ctx *godog.ScenarioContext) {
 		add("plain-session-id", "", prompt)
 		return nil
 	})
+	ctx.Step(`^two projects where "([^"]*)" has a session and "([^"]*)" has a session$`, func(a, b string) error {
+		mk := func(id, cwd string) ProjectSummary {
+			sess := SessionSummary{ID: id, Cwd: cwd, LastPrompt: "work in " + cwd, LastActive: time.Now()}
+			return ProjectSummary{DirName: cwd, Cwd: cwd, Sessions: []SessionSummary{sess}}
+		}
+		w.m.projects = []ProjectSummary{mk("alpha-session-id", a), mk("beta-session-id", b)}
+		return nil
+	})
+	ctx.Step(`^I open the all-sessions list$`, func() error {
+		w.m.sessionFilterProj = -1
+		next, _ := w.m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+		w.m = next.(model)
+		w.view = ansi.Strip(w.m.View())
+		return nil
+	})
+	ctx.Step(`^I open the sessions of "([^"]*)"$`, func(project string) error {
+		for i, p := range w.m.projects {
+			if p.Cwd == project {
+				w.m.sessionFilterProj = i
+			}
+		}
+		next, _ := w.m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+		w.m = next.(model)
+		w.view = ansi.Strip(w.m.View())
+		return nil
+	})
+	ctx.Step(`^the header has a PROJECT column$`, func() error {
+		if !strings.Contains(w.view, "PROJECT") {
+			return fmt.Errorf("expected a PROJECT header, got:\n%s", w.view)
+		}
+		return nil
+	})
+	ctx.Step(`^the header has no PROJECT column$`, func() error {
+		if strings.Contains(w.view, "PROJECT") {
+			return fmt.Errorf("expected no PROJECT header, got:\n%s", w.view)
+		}
+		return nil
+	})
+	ctx.Step(`^a row shows "([^"]*)" and a row shows "([^"]*)"$`, func(a, b string) error {
+		if err := rowContains(w.view, a); err != nil {
+			return err
+		}
+		return rowContains(w.view, b)
+	})
+	ctx.Step(`^only the session from "([^"]*)" is listed$`, func(project string) error {
+		got := w.m.visibleSessions()
+		if len(got) != 1 || got[0].Cwd != project {
+			return fmt.Errorf("expected only the session from %q, got %+v", project, got)
+		}
+		return nil
+	})
 	ctx.Step(`^I open the Session View$`, func() error {
 		next, _ := w.m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 		w.m = next.(model)

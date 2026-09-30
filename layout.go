@@ -263,13 +263,19 @@ func (m model) renderSessions() []string {
 	if len(sessions) == 0 {
 		return []string{dimStyle.Render("No sessions found.")}
 	}
+	global := m.sessionFilterProj < 0
 	cols := []column{
 		{title: "SESSION ID / TIME", width: 20},
 		{title: "NAME", flex: 3, min: 12, max: 30},
-		{title: "LAST PROMPT", flex: 7, min: 20},
-		{title: "EXCHNG", width: 6},
-		{title: "TOKENS", width: 8},
 	}
+	if global {
+		cols = append(cols, column{title: "PROJECT", flex: 4, min: 14, max: 45})
+	}
+	cols = append(cols,
+		column{title: "LAST PROMPT", flex: 7, min: 20},
+		column{title: "EXCHNG", width: 6},
+		column{title: "TOKENS", width: 8},
+	)
 	var rows [][]string
 	for _, sess := range sessions {
 		name := m.sessionNames[sess.ID]
@@ -280,12 +286,21 @@ func (m model) renderSessions() []string {
 		if len(id) > 8 {
 			id = id[:8]
 		}
-		rows = append(rows, []string{
-			fmt.Sprintf("%s (%s)", id, relTime(sess.LastActive)),
-			name, sess.LastPrompt, fmt.Sprint(sess.Exchanges), formatTokens(sess.Tokens),
-		})
+		row := []string{fmt.Sprintf("%s (%s)", id, relTime(sess.LastActive)), name}
+		if global {
+			row = append(row, sessionProject(sess))
+		}
+		rows = append(rows, append(row, sess.LastPrompt, fmt.Sprint(sess.Exchanges), formatTokens(sess.Tokens)))
 	}
 	return m.renderTable(cols, rows)
+}
+
+// sessionProject is the project a session belongs to, for the all-sessions list.
+func sessionProject(s SessionSummary) string {
+	if s.Cwd != "" {
+		return s.Cwd
+	}
+	return s.ProjectDir
 }
 
 func (m model) renderQueries() []string {
@@ -324,13 +339,13 @@ func (m model) renderFooter() string {
 	var legend string
 	switch m.activeView {
 	case viewSessions:
-		legend = " <Enter> Costs  <n> New  <r> Resume  <v> Log  <R> Rename  <d> Delete  <Esc> Back  <:> Cmd  <q> Quit "
+		legend = " <Enter> Costs <s> Projects <n> New <r> Resume <v> Log <R> Rename <d> Del <Esc> Up <:> Cmd <q> Quit "
 	case viewContexts:
 		legend = " <Enter> Switch Context  <:> Cmd  <q> Quit "
 	case viewQueries:
 		legend = " <Esc> Back  <:> Cmd  <q> Quit "
 	default:
-		legend = " <Enter> Sessions  <n> New  <j/k> Move  </> Filter  <:> Cmd  <q> Quit "
+		legend = " <Enter> Sessions  <s> Sessions  <n> New  <j/k> Move  </> Filter  <:> Cmd  <q> Quit "
 	}
 	if m.statusMsg != "" {
 		legend = fmt.Sprintf(" [%s] |%s", m.statusMsg, legend)

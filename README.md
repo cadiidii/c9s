@@ -69,13 +69,16 @@ contexts:
 c9s
 ```
 
+c9s opens on the all-sessions list, so the session you were last working in is
+at the top. Press `s` to switch to the per-project list and back.
+
 ### Command bar
 
 | Command | Action |
 |---|---|
 | `:ctx`  | Switch to the Context View |
-| `:proj` | Switch to the Project View (default) |
-| `:sess` | Global chronological Session View across all projects |
+| `:proj` | Switch to the Project View |
+| `:sess` | All-sessions view across every project, most recently used first (same as `s` from the Project View) |
 | `:q`    | Quit |
 
 ### Keys
@@ -88,6 +91,7 @@ c9s
 | `Esc` | Clear filter, or back out one view |
 | `r` | Resume the selected session (`claude --resume <id>`) |
 | `v` | Open the selected session's raw `.jsonl` in `$EDITOR` |
+| `s` | Toggle between the Project View and the all-sessions list (newest first, with a PROJECT column) |
 | `n` | Start a new Claude Code session in the selected project's (Project View) or session's (Session View) directory, using the current context's profile |
 | `R` | Rename the selected session (a display-only label, stored in `~/.config/c9s/session-names.yaml` — never touches the underlying transcript or its session ID, so `--resume` keeps working) |
 | `d` | Delete the selected session (asks for `y`/`n` confirmation) |
