@@ -57,6 +57,21 @@ func initSessionListScenario(ctx *godog.ScenarioContext) {
 		add("named-session-id", name, prompt)
 		return nil
 	})
+	ctx.Step(`^a session list with a session that Claude Code named "([^"]*)" whose last prompt is "([^"]*)"$`, func(name, prompt string) error {
+		w.sessions = append(w.sessions, SessionSummary{ID: "named-session-id", CustomTitle: name, LastPrompt: prompt, LastActive: time.Now()})
+		w.m.projects = []ProjectSummary{{DirName: "p", Cwd: "/tmp/p", Sessions: w.sessions}}
+		return nil
+	})
+	ctx.Step(`^I renamed that session to "([^"]*)" in c9s$`, func(name string) error {
+		w.m.sessionNames["named-session-id"] = name
+		return nil
+	})
+	ctx.Step(`^the row for that session does not show "([^"]*)"$`, func(not string) error {
+		if strings.Contains(w.view, not) {
+			return fmt.Errorf("expected %q to be absent, got:\n%s", not, w.view)
+		}
+		return nil
+	})
 	ctx.Step(`^a session list with an unnamed session whose last prompt is "([^"]*)"$`, func(prompt string) error {
 		add("plain-session-id", "", prompt)
 		return nil
@@ -140,7 +155,7 @@ func initSessionListScenario(ctx *godog.ScenarioContext) {
 	})
 	ctx.Step(`^only the session named "([^"]*)" is listed$`, func(name string) error {
 		got := w.m.visibleSessions()
-		if len(got) != 1 || w.m.sessionNames[got[0].ID] != name {
+		if len(got) != 1 || w.m.sessionName(got[0]) != name {
 			return fmt.Errorf("expected only %q listed, got %d sessions", name, len(got))
 		}
 		return nil

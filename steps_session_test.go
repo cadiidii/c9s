@@ -88,6 +88,20 @@ func initSessionScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^a session transcript with:$`, sessionTranscriptTable)
 	ctx.Step(`^the transcript has a final cost-state of \$([0-9.]+) across model "([^"]+)" with (\d+) tokens$`, transcriptCostState)
 	ctx.Step(`^a session transcript containing one valid user line and one line of garbage text$`, malformedTranscript)
+	ctx.Step(`^the transcript was (?:later )?renamed in Claude Code to "([^"]*)"$`, func(name string) error {
+		sw.rawLines = append(sw.rawLines, fmt.Sprintf(`{"type":"custom-title","customTitle":%q,"sessionId":"s"}`, name))
+		return nil
+	})
+	ctx.Step(`^the transcript has a generated title "([^"]*)"$`, func(title string) error {
+		sw.rawLines = append(sw.rawLines, fmt.Sprintf(`{"type":"ai-title","aiTitle":%q,"sessionId":"s"}`, title))
+		return nil
+	})
+	ctx.Step(`^the session name is "([^"]*)"$`, func(want string) error {
+		if got := sw.parsedSession.Title(); got != want {
+			return fmt.Errorf("session name = %q, want %q", got, want)
+		}
+		return nil
+	})
 	ctx.Step(`^I parse the session$`, iParseTheSession)
 	ctx.Step(`^parsing the session succeeds$`, parsingSessionSucceeds)
 	ctx.Step(`^the session last prompt is "([^"]*)"$`, theSessionLastPromptIs)

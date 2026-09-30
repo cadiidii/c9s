@@ -654,12 +654,21 @@ func (m model) visibleSessions() []SessionSummary {
 	var out []SessionSummary
 	for _, s := range base {
 		if strings.Contains(strings.ToLower(s.LastPrompt), q) || strings.Contains(strings.ToLower(s.ID), q) ||
-			strings.Contains(strings.ToLower(m.sessionNames[s.ID]), q) ||
+			strings.Contains(strings.ToLower(m.sessionName(s)), q) ||
 			(m.sessionFilterProj < 0 && strings.Contains(strings.ToLower(sessionProject(s)), q)) {
 			out = append(out, s)
 		}
 	}
 	return out
+}
+
+// sessionName is what the NAME column shows: a name set in c9s wins, then the
+// name from Claude Code (/rename, then its generated title).
+func (m model) sessionName(s SessionSummary) string {
+	if custom := m.sessionNames[s.ID]; custom != "" {
+		return custom
+	}
+	return s.Title()
 }
 
 func (m model) rowCount() int {

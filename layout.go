@@ -278,7 +278,7 @@ func (m model) renderSessions() []string {
 	)
 	var rows [][]string
 	for _, sess := range sessions {
-		name := m.sessionNames[sess.ID]
+		name := m.sessionName(sess)
 		if name == "" {
 			name = "-"
 		}

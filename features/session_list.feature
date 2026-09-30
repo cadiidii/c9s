@@ -36,3 +36,21 @@ Feature: Session View columns
     When I open the all-sessions list
     And I filter the sessions by "beta"
     Then only the session from "/work/beta" is listed
+
+  Scenario: A session named in Claude Code shows that name
+    Given a session list with a session that Claude Code named "Auth refactor" whose last prompt is "add retry to login"
+    When I open the Session View
+    Then the row for that session shows "Auth refactor" and "add retry to login"
+
+  Scenario: A name set in c9s takes precedence over the Claude Code name
+    Given a session list with a session that Claude Code named "Auth refactor" whose last prompt is "add retry to login"
+    And I renamed that session to "My label" in c9s
+    When I open the Session View
+    Then the row for that session shows "My label" and "add retry to login"
+    And the row for that session does not show "Auth refactor"
+
+  Scenario: Filtering matches the name Claude Code gave the session
+    Given a session list with a session that Claude Code named "Auth refactor" whose last prompt is "add retry to login"
+    And a session list also containing an unnamed session whose last prompt is "fix flaky test"
+    When I filter the sessions by "auth"
+    Then only the session named "Auth refactor" is listed
