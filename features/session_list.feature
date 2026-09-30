@@ -19,3 +19,20 @@ Feature: Session View columns
     And a session list also containing an unnamed session whose last prompt is "fix flaky test"
     When I filter the sessions by "auth"
     Then only the session named "Auth refactor" is listed
+
+  Scenario: The all-sessions list shows which project each session belongs to
+    Given two projects where "/work/alpha" has a session and "/work/beta" has a session
+    When I open the all-sessions list
+    Then the header has a PROJECT column
+    And a row shows "/work/alpha" and a row shows "/work/beta"
+
+  Scenario: A single project's session list has no PROJECT column
+    Given two projects where "/work/alpha" has a session and "/work/beta" has a session
+    When I open the sessions of "/work/alpha"
+    Then the header has no PROJECT column
+
+  Scenario: Filtering the all-sessions list matches the project path
+    Given two projects where "/work/alpha" has a session and "/work/beta" has a session
+    When I open the all-sessions list
+    And I filter the sessions by "beta"
+    Then only the session from "/work/beta" is listed

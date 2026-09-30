@@ -84,7 +84,7 @@ func initialModel(cfg AppConfig, sessionNames map[string]string) model {
 	}
 	return model{
 		config:            cfg,
-		activeView:        viewProjects,
+		activeView:        viewSessions,
 		sessionFilterProj: -1,
 		loading:           true,
 		sessionNames:      sessionNames,
@@ -253,6 +253,9 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "d":
 		return m.handleDeletePrompt()
+
+	case "s":
+		return m.handleToggleSessions()
 
 	case "n":
 		return m.handleNewSession()
@@ -451,6 +454,23 @@ func buildClaudeCmd(ctx ContextConfig, dir string, args ...string) (*exec.Cmd, e
 
 // handleNewSession starts a new claude session in the selected project's
 // directory (Project View) or the selected session's directory (Session View).
+// handleToggleSessions flips between the Project View and the all-projects
+// Session View (newest first, per AllSessions).
+func (m model) handleToggleSessions() (tea.Model, tea.Cmd) {
+	switch m.activeView {
+	case viewProjects:
+		m.activeView = viewSessions
+	case viewSessions:
+		m.activeView = viewProjects
+	default:
+		return m, nil
+	}
+	m.sessionFilterProj = -1
+	m.filterQuery = ""
+	m.cursor = 0
+	return m, nil
+}
+
 func (m model) handleNewSession() (tea.Model, tea.Cmd) {
 	var dir string
 	switch m.activeView {
@@ -634,7 +654,8 @@ func (m model) visibleSessions() []SessionSummary {
 	var out []SessionSummary
 	for _, s := range base {
 		if strings.Contains(strings.ToLower(s.LastPrompt), q) || strings.Contains(strings.ToLower(s.ID), q) ||
-			strings.Contains(strings.ToLower(m.sessionNames[s.ID]), q) {
+			strings.Contains(strings.ToLower(m.sessionNames[s.ID]), q) ||
+			(m.sessionFilterProj < 0 && strings.Contains(strings.ToLower(sessionProject(s)), q)) {
 			out = append(out, s)
 		}
 	}

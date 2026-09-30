@@ -201,6 +201,19 @@ func initNavigationScenario(ctx *godog.ScenarioContext) {
 		return nil
 	})
 
+	ctx.Step(`^two projects where "([^"]*)" was last used 2 hours ago and "([^"]*)" was last used 5 minutes ago$`, func(older, newer string) error {
+		w.m.projects = []ProjectSummary{
+			{DirName: older, Cwd: older, Sessions: []SessionSummary{{ID: "s-old", Path: "/tmp/s-old.jsonl", Cwd: older, LastActive: time.Now().Add(-2 * time.Hour)}}},
+			{DirName: newer, Cwd: newer, Sessions: []SessionSummary{{ID: "s-new", Path: "/tmp/s-new.jsonl", Cwd: newer, LastActive: time.Now().Add(-5 * time.Minute)}}},
+		}
+		return nil
+	})
+	ctx.Step(`^c9s starts up$`, func() error {
+		// Only the initial state is under test; Init (which scans disk) is not run.
+		w.m = initialModel(defaultConfig(), nil)
+		return nil
+	})
+
 	// ---- When: keypresses ----
 	ctx.Step(`^I press "([^"]*)" on the "([^"]*)" context row$`, func(key, contextKey string) error {
 		keys := w.m.contextKeys()
@@ -290,6 +303,25 @@ func initNavigationScenario(ctx *godog.ScenarioContext) {
 		}
 		if rows[0].Cwd != want {
 			return fmt.Errorf("expected visible project %q, got %q", want, rows[0].Cwd)
+		}
+		return nil
+	})
+	ctx.Step(`^the sessions listed come from both projects$`, func() error {
+		if got := len(w.m.visibleSessions()); got != 2 {
+			return fmt.Errorf("expected sessions from both projects (2), got %d", got)
+		}
+		return nil
+	})
+	ctx.Step(`^the first session listed belongs to "([^"]*)"$`, func(project string) error {
+		got := w.m.visibleSessions()
+		if len(got) == 0 || got[0].Cwd != project {
+			return fmt.Errorf("expected first session from %q, got %+v", project, got)
+		}
+		return nil
+	})
+	ctx.Step(`^the sessions listed are not limited to one project$`, func() error {
+		if w.m.sessionFilterProj >= 0 {
+			return fmt.Errorf("expected the all-projects list, but it is scoped to project %d", w.m.sessionFilterProj)
 		}
 		return nil
 	})
